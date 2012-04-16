@@ -1,0 +1,1 @@
+This package contains a fabfile (+ cuisine) that replaces Chef for simple provisioning and deployment of Django app running on Debian 6.
