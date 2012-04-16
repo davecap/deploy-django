@@ -1,0 +1,69 @@
+#!/bin/sh
+### BEGIN INIT INFO
+# Provides:       myapp
+# Required-Start: $local_fs $syslog
+# Required-Stop:  $local_fs $syslog
+# Default-Start:  2 3 4 5
+# Default-Stop:   0 1 6
+# Short-Description: Gunicorn processes for myapp
+### END INIT INFO
+
+NAME="myapp"
+PID="/tmp/gunicorn_$NAME.pid"
+RETVAL=0
+
+# source function library
+. /lib/lsb/init-functions
+
+start()
+{
+    if [ -f $PID ]; then
+        echo "$NAME is already running! PID file: ${PID}"
+    else
+        echo "Starting $NAME."
+        cd /srv/myapp
+        su -c "source /srv/myapp/shared/env/bin/activate; /srv/myapp/shared/env/bin/gunicorn_django -c /etc/gunicorn/myapp.conf.py -p $PID -D current/myapp/settings.py" myapp && echo "OK" || echo "failed";
+    fi
+}
+
+stop()
+{
+    if [ -f $PID ]; then
+        echo "Stopping $NAME"
+        kill -QUIT `cat $PID` && echo "OK" || echo "failed";
+    else
+        echo "$NAME not running"
+    fi
+}
+
+reload()
+{
+    echo "Reloading $NAME:"
+    if [ -f $PID ]; then
+        kill -HUP `cat $PID` && echo "OK" || echo "failed";
+    else
+        echo "$NAME not running"
+    fi
+}
+
+case "$1" in
+    start)
+        start
+        ;;
+    stop)
+        stop
+        ;;
+    restart)
+        reload
+        ;;
+    reload)
+        reload
+        ;;
+    force-reload)
+        stop && start
+        ;;
+    *)
+        echo $"Usage: $0 {start|stop|restart}"
+        RETVAL=1
+esac
+exit $RETVAL

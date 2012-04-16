@@ -1,0 +1,11 @@
+env
+*.pid
+*.log
+*.csv
+*.pyc
+*.swp
+*~
+*.cache
+*#*
+*.DS_Store
+pip-log.txt

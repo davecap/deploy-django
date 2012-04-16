@@ -1,0 +1,55 @@
+# Set cache dir
+proxy_cache_path /var/cache/nginx levels=1:2 
+                 keys_zone=microcache:5m max_size=1000m;
+
+upstream backend {
+    server 127.0.0.1:8080 fail_timeout=0;
+}
+
+server {
+    listen 0.0.0.0:80 default deferred;
+    #listen 0.0.0.0:443 default ssl;
+    server_name  myapp.com;
+    access_log  /var/log/nginx/myapp.com.access.log;
+    error_log  /var/log/nginx/myapp.com.error.log;
+
+    log_format timed_combined '$remote_addr - $remote_user [$time_local]  '
+                              '"$request" $status $body_bytes_sent '
+                              '"$http_referer" "$http_user_agent" '
+                              '$request_time $upstream_response_time $gzip_ratio';
+
+    access_log  /var/log/nginx/myapp.com.time.log timed_combined;
+
+    client_max_body_size 4G;
+    keepalive_timeout 5;
+
+    #ssl_certificate      /etc/ssl/myapp/certs/myapp.ca.crt;
+    #ssl_certificate_key  /etc/ssl/myapp/private/myapp.ca.key;
+
+    location /static {
+        expires max;
+        alias /srv/myapp/current/myapp/static_root;
+    }
+
+    location /media {
+        if ($query_string) {
+            expires max;
+        }
+        alias /srv/myapp/current/myapp/media_root;
+    }
+
+    location / {
+        proxy_buffering on;
+        proxy_pass_header Server;
+        proxy_set_header Host $http_host;
+        proxy_redirect off;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Scheme $scheme;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_connect_timeout 10;
+        proxy_read_timeout 10;
+        proxy_pass http://backend;
+    }
+    
+    error_page 500 502 503 504 /static/500.html;
+}
