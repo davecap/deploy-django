@@ -6,7 +6,7 @@ from cuisine import mode_user, dir_ensure, user_ensure, group_ensure, \
                     ssh_authorize, file_attribs, package_ensure, file_link, \
                     file_exists
 
-from settings import *
+from deploy_settings import *
 
 # app details
 env.app = APP_NAME
