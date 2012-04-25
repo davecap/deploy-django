@@ -6,24 +6,25 @@ from cuisine import mode_user, dir_ensure, user_ensure, group_ensure, \
                     ssh_authorize, file_attribs, package_ensure, file_link, \
                     file_exists
 
-
-# the default role is development
-env.role = 'development'
+from settings import *
 
 # app details
-env.app = 'myapp'
-env.repo = 'git@github.com:GITUSER/myapp.git'
-env.branch = 'master'
+env.app = APP_NAME
+env.repo = APP_REPO
+env.branch = APP_REPO_BRANCH
+env.static_root = DJANGO_STATIC_ROOT
+env.media_root = DJANGO_MEDIA_ROOT
 
 # directory containing provisioning files
 env.provision_dir = 'provision'
 # base project dir (dir of this fabfile by default)
 env.local_dir = os.path.dirname(env.real_fabfile)
 
-# these are the parameters for the remote system
-env.hosts = ['dev@dev.myapp.com']
-env.remote_user = 'myapp'
-env.remote_group = 'myapp'
+# remote host(s)
+env.hosts = APP_HOSTS
+# remote user/group to log in as (created in initialize)
+env.remote_user = REMOTE_USER
+env.remote_group = REMOTE_GROUP
 
 # the root dir of this repo (the dir of this fabfile)
 env.root_dir = os.path.join('/srv/', env.app)
@@ -35,19 +36,7 @@ env.app_dir = os.path.join(env.root_dir, env.app)
 env.media_dir = os.path.join(env.root_dir, 'current', env.app, 'media')
 
 
-def prod():
-    # production environment
-    env.role = 'production'
-    env.hosts = ['prod@myapp.com']
-    # env.root_dir = os.path.join('/srv/', env.app)
-    # env.virtualenv = os.path.join(env.root_dir, 'shared/env')
-    # env.activate = 'source %s/bin/activate ' % env.virtualenv
-    # env.app_dir = os.path.join(env.root_dir, env.app)
-    # env.media_dir = os.path.join(env.root_dir, 'current', env.app, 'media')
-    pass
-
-
-def pre_provision():
+def initialize():
     """Log in to the server as root and create the initial user/group"""
     env.user = 'root'
     mode_user()
@@ -68,44 +57,12 @@ def provision():
     """Sets up packages and the deploy tree"""
     mode_sudo()
 
-    debian_packages = [
-        "sudo",
-        "libpq-dev",
-        "python-dev",
-        "swig",
-        "rsync",
-        "wkhtmltopdf",
-        "memcached",
-        "nginx",
-        "denyhosts",
-        "screen",
-        "vim",
-        "imagemagick",
-        "openssl",
-        "postgresql",
-        "postfix",
-        "git",
-        "python-setuptools",
-        "supervisor"
-    ]
-
-    deploy_tree = {
-        env.app: {
-            'releases': {},
-            'shared': {
-                'logs': {},
-                'media_root': {},
-                'static_root': {}
-            }
-        }
-    }
-
-    for p in debian_packages:
+    for p in DEBIAN_PACKAGES:
         package_ensure(p)
 
     # Create the deploy tree
     dir_ensure("/srv", owner="root", group="root")
-    ensure_tree('/srv', deploy_tree, owner=env.remote_user, group=env.remote_group)
+    ensure_tree('/srv', DEPLOY_TREE, owner=env.remote_user, group=env.remote_group)
 
     # Postgres
     dir_ensure("/etc/postgresql/8.4/main", owner="postgres", group="postgres")
@@ -136,6 +93,9 @@ def provision():
     # poor man's start on boot
     provision_file_upload("/etc/rc.local", mode='755', owner="root", group="root")
 
+    # settings_local.py
+    provision_file_upload("/srv/%(app)s/shared/settings_local.py", owner=env.remote_user, group=env.remote_group)
+
 
 def deploy():
     """
@@ -150,9 +110,9 @@ def deploy():
                 abort("deploy halted: remove dead _latest clone")
             run("git clone -b %(branch)s %(repo)s releases/_latest" % env)
 
-            # upload settings_local.py
-            # TODO: how to handle deploy settings?
-            # file_upload('/srv/%(app)s/releases/_latest/%(app)s/settings_local.py' % env, _deploy_file_path('srv/%(app)s/shared/settings_local.py' % env))
+            # link settings_local.py
+            # TODO: handle template
+            file_link("/srv/%(app)s/shared/settings_local.py", "/srv/%(app)s/releases/_latest/%(app)s/settings_local.py" % env)
 
             # get the latest release
             env.latest_release = run("git --git-dir=releases/_latest/.git rev-parse origin/%(branch)s" % env)
@@ -168,7 +128,7 @@ def deploy():
                 abort('deploy halted: migration failed!')
 
             # collectstatic
-            file_link("/srv/%(app)s/shared/static_root" % env, "releases/_latest/%(app)s/static_root" % env)
+            file_link("/srv/%(app)s/shared/%(static_root)s" % env, "releases/_latest/%(app)s/%(static_root)s" % env)
             output = run('python releases/_latest/%(app)s/manage.py collectstatic --noinput -i "*.pyc"' % env)
             if output.failed:
                 abort('deploy halted: collectstatic failed!')
@@ -180,9 +140,11 @@ def deploy():
                     run("rm previous")
                 run("mv current previous")
 
+            # link current to latest release
             file_link("/srv/%(app)s/releases/%(latest_release)s" % env, "current")
 
             # restart supervisord
+            # TODO: there must be a better way
             #sudo('supervisorctl status %(app)s | sed "s/.*[pid ]\([0-9]\+\)\,.*/\\1/" | xargs kill -HUP' % env)
 
             # restart gunicorn
@@ -190,7 +152,8 @@ def deploy():
 
 
 def rollback():
-    # TODO!!
+    # TODO
+    # roll forward with hotfixes for now ;)
     pass
 
 
@@ -217,7 +180,6 @@ def assert_git_valid():
     """
     Check git repo to make sure it is ready to deploy the latest code
     """
-
     repo = git.Repo(env.local_dir)
 
     # check the branch, repo and untracked files
@@ -228,16 +190,5 @@ def assert_git_valid():
     elif repo.untracked_files:
         raise Exception('There are untracked files: %s' % repo.untracked_files)
 
-    # check that the remote repo is up to date
-    # out, err = _run_command('git push --dry-run')
-    # if err == 'Everything up-to-date\n':
-    #     logging.info('Remote repository up to date')
-    # else:
-    #     raise Exception('Remote repository was not up to date:\n%s' % err)
-
-    # check that local copy is up to date
-    # out, err = _run_command('git pull')
-    # if 'up-to-date' not in out:
-    #     raise Exception('Local copy was not up to date:\n%s' % out)
-    # else:
-    #     logging.info('Local copy up to date')
+    # TODO: check that remote repo is up to date
+    # TODO: check that local copy is up to date
